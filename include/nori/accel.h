@@ -12,29 +12,18 @@
 
 NORI_NAMESPACE_BEGIN
 
-    struct OctNode {
+    struct AccelNode {
         uint32_t child = 0;
         BoundingBox3f bbox;
         std::vector<uint32_t> indices;
 
-        OctNode() : bbox() {}
+        AccelNode() : bbox() {}
 
-        explicit OctNode(BoundingBox3f box)
+        explicit AccelNode(BoundingBox3f box)
                 : bbox(std::move(box)) {}
 
-        OctNode(BoundingBox3f box, uint32_t size)
+        AccelNode(BoundingBox3f box, uint32_t size)
                 : bbox(std::move(box)), indices(size) {}
-    };
-
-    struct BVHNode {
-        uint32_t child = 0;
-        BoundingBox3f bbox;
-        std::vector<uint32_t> indices;
-
-        BVHNode() : bbox() {}
-
-        explicit BVHNode(BoundingBox3f box)
-                : bbox(std::move(box)) {}
     };
 
 /**
@@ -60,9 +49,6 @@ NORI_NAMESPACE_BEGIN
 
         void buildBVH();
 
-        void addOctTreeNode(uint32_t index);
-
-        void addBVHNode(uint32_t index);
 
         bool traverseOctTree(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const;
 
@@ -95,14 +81,14 @@ NORI_NAMESPACE_BEGIN
     private:
         Mesh *m_mesh = nullptr; ///< Mesh (only a single one for now)
         BoundingBox3f m_bbox;           ///< Bounding box of the entire scene
-        std::vector<OctNode> m_octTree;
-        std::vector<BVHNode> m_BVH;
+        std::vector<AccelNode> m_tree;
         uint32_t m_maxDepth = 1;//最大深度
         uint32_t m_leafCount = 1;//叶子节点数量
         uint32_t m_nodeCount = 1;//节点总数
 
         static constexpr uint32_t COUNT_MIN = 16;
-        static constexpr uint32_t DEPTH_MAX = 8;
+        static constexpr uint32_t DEPTH_OCT_MAX = 12;
+        static constexpr uint32_t DEPTH_BVH_MAX = 32;
     };
 
 NORI_NAMESPACE_END

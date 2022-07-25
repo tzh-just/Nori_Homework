@@ -35,22 +35,22 @@ NORI_NAMESPACE_BEGIN
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        m_octTree.clear();
+        m_tree.clear();
 
-        auto root = OctNode(m_mesh->getBoundingBox(), m_mesh->getTriangleCount());
+        auto root = AccelNode(m_mesh->getBoundingBox(), m_mesh->getTriangleCount());
 
         for (int i = 0; i < root.indices.size(); i++) {
             root.indices[i] = i;
         }
 
         //添加根节点
-        m_octTree.emplace_back(root);
+        m_tree.emplace_back(root);
 
         //辅助队列，存储八叉树节点的索引
         std::queue<uint32_t> q;
         q.push(0);
 
-        //记录当前深度
+        //基本数据
         uint32_t depth_curr = 1;
 
         //构建八叉树
@@ -64,25 +64,29 @@ NORI_NAMESPACE_BEGIN
                 q.pop();
 
                 //节点持有的图元数量不足以继续分裂
-                if (m_octTree[ptr].indices.size() < COUNT_MIN) {
+                if (m_tree[ptr].indices.size() < COUNT_MIN) {
                     continue;
                 }
 
                 //八叉树构建深度超过了最大深度
-                if (depth_curr >= DEPTH_MAX) {
+                if (depth_curr >= DEPTH_OCT_MAX) {
                     continue;
                 }
 
-                m_octTree[ptr].child = m_octTree.size();
+                //设置子节点索引
+                m_tree[ptr].child = m_tree.size();
 
+                //预备数据
+                //-----------------------------------------------------------
 
-                Vector3f center = m_octTree[ptr].bbox.getCenter();
+                //获取节点包围盒的中心点
+                Vector3f center = m_tree[ptr].bbox.getCenter();
 
                 //计算节点分裂的八个子节点包围盒
                 for (uint32_t i = 0; i < 8; i++) {
                     //获取包围盒中心点和拐角点左边
 
-                    Vector3f corner = m_octTree[ptr].bbox.getCorner(i);
+                    Vector3f corner = m_tree[ptr].bbox.getCorner(i);
 
                     //计算子包围盒范围
                     Vector3f minPoint, maxPoint;
@@ -94,32 +98,32 @@ NORI_NAMESPACE_BEGIN
                     //生成子包围盒
                     BoundingBox3f bbox_sub(minPoint, maxPoint);
 
-                    OctNode node_sub(bbox_sub);
+                    //生成子节点
+                    AccelNode node_sub(bbox_sub);
 
                     //遍历节点持有的所有图元
-                    for (auto face: m_octTree[ptr].indices)
+                    for (auto face: m_tree[ptr].indices)
                         //判断子节点是否覆盖图元
                         if (bbox_sub.overlaps(m_mesh->getBoundingBox(face)))
                             node_sub.indices.emplace_back(face);
 
-                    q.push(m_octTree.size());
-                    m_octTree.emplace_back(node_sub);
+                    //入队
+                    q.push(m_tree.size());
+                    //构建二叉树
+                    m_tree.emplace_back(node_sub);
                 }
 
+                //记录数据
                 m_nodeCount += 8;
                 m_leafCount += 7;
-
-                //清理父节点的图元索引数组并销毁无用内存空间
-/*                m_octTree[ptr].indices.clear();
-                m_octTree[ptr].indices.shrink_to_fit();*/
             }
             depth_curr++;
         }
 
         m_maxDepth = depth_curr;
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        auto over = std::chrono::high_resolution_clock::now();
+        auto time = std::chrono::duration_cast<std::chrono::milliseconds>(over - start).count();
 
         std::cout << "build time: " << time << std::endl;
         std::cout << "max depth: " << m_maxDepth << std::endl;
@@ -127,211 +131,163 @@ NORI_NAMESPACE_BEGIN
         std::cout << "leaf count: " << m_leafCount << std::endl;
     }
 
-    void Accel::addOctTreeNode(uint32_t index) {
-
-    }
 
     void Accel::buildBVH() {
         if (!m_mesh) return;
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        m_BVH.clear();
-        auto root = BVHNode(m_mesh->getBoundingBox());
-        m_BVH.emplace_back(root);
+        m_tree.clear();
 
-        for (uint32_t index = 0; index < m_mesh->getTriangleCount(); index++)
-            addBVHNode(index);
+        auto root = AccelNode(m_mesh->getBoundingBox(), m_mesh->getTriangleCount());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        for (int i = 0; i < root.indices.size(); i++) {
+            root.indices[i] = i;
+        }
+
+        //添加根节点
+        m_tree.emplace_back(root);
+
+        //辅助队列，存储八叉树节点的索引
+        std::queue<uint32_t> q;
+        q.push(0);
+
+        //基本数据
+        float cost_min = std::numeric_limits<float>::infinity();
+        uint32_t count_bucket = 10;
+        uint32_t depth_curr = 1;
+
+        //构建二叉树
+        while (!q.empty()) {
+            //层次遍历
+            uint32_t n = q.size();
+            for (uint32_t k = 0; k < n; k++) {
+
+                //出队
+                auto ptr = q.front();
+                q.pop();
+
+                //节点持有的图元数量不足以继续分裂
+                if (m_tree[ptr].indices.size() < COUNT_MIN) {
+                    continue;
+                }
+
+                //八叉树构建深度超过了最大深度
+                if (depth_curr >= DEPTH_BVH_MAX) {
+                    continue;
+                }
+
+                //设置子节点索引
+                m_tree[ptr].child = m_tree.size();
+
+                //预备数据
+                //-----------------------------------------------------------
+
+                //获取包围盒的最长轴
+                uint32_t dimension = m_tree[ptr].bbox.getMajorAxis();
+
+                std::sort(
+                        m_tree[ptr].indices.begin(),
+                        m_tree[ptr].indices.end(),
+                        [this, dimension](uint32_t f1, uint32_t f2) {
+                            return m_mesh->getBoundingBox(f1).getCenter()[dimension] <
+                                   m_mesh->getBoundingBox(f2).getCenter()[dimension];
+                        }
+                );
+
+                uint32_t index_bucket;
+                //在最长维度上分桶
+                for (uint32_t i = 1; i < count_bucket; i++) {
+                    auto begin_bucket = m_tree[ptr].indices.begin();
+                    auto mid_bucket = m_tree[ptr].indices.begin() + (static_cast<uint32_t>(m_tree[ptr].indices.size()) * i / count_bucket);
+                    auto end_bucket = m_tree[ptr].indices.end();
+
+                    //左右两侧包围盒内图元索引数组
+                    auto faces_left = std::vector<uint32_t>(begin_bucket, mid_bucket);
+                    auto faces_right = std::vector<uint32_t>(mid_bucket, end_bucket);
+
+                    //重置包围盒
+                    BoundingBox3f bbox_left, bbox_right;
+
+                    //遍历左右两侧包围盒内图元，合并图元的包围盒
+                    for (auto left: faces_left) {
+                        bbox_left = BoundingBox3f::merge(bbox_left, m_mesh->getBoundingBox(left));
+                    }
+                    for (auto right: faces_right) {
+                        bbox_right = BoundingBox3f::merge(bbox_right, m_mesh->getBoundingBox(right));
+                    }
+
+                    //获取左右两侧包围盒的表面积
+                    auto S_LEFT = bbox_left.getSurfaceArea();
+                    auto S_RIGHT = bbox_right.getSurfaceArea();
+
+                    //获取节点包围盒的表面积
+                    auto S_ALL = m_tree[ptr].bbox.getSurfaceArea();
+
+                    //计算本次分桶的成本
+                    auto cost = 0.125f +
+                                static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
+                                static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
+
+                    //留下最小成本的分桶位置
+                    if (cost < cost_min) {
+                        cost_min = cost;
+                        index_bucket = i;
+                    }
+                }
+
+                auto begin = m_tree[ptr].indices.begin();
+                auto mid = m_tree[ptr].indices.begin() + (static_cast<uint32_t>(m_tree[ptr].indices.size()) * index_bucket / count_bucket);
+                auto end = m_tree[ptr].indices.end();
+
+                //左右两侧包围盒内图元索引数组
+                auto faces_left = std::vector<uint32_t>(begin, mid);
+                auto faces_right = std::vector<uint32_t>(mid, end);
+
+                //重置包围盒
+                BoundingBox3f bbox_left, bbox_right;
+
+                //遍历左右两侧包围盒内图元，合并图元的包围盒
+                for (auto left: faces_left) {
+                    bbox_left.expandBy(m_mesh->getBoundingBox(left));
+                }
+                for (auto right: faces_right) {
+                    bbox_right.expandBy(m_mesh->getBoundingBox(right));
+                }
+
+                AccelNode leftNode(bbox_left);
+                AccelNode rightNode(bbox_right);
+
+                leftNode.indices = faces_left;
+                rightNode.indices = faces_right;
+
+                //入队
+                q.push(m_tree.size());
+                //构建二叉树
+                m_tree.emplace_back(leftNode);
+                //入队
+                q.push(m_tree.size());
+                //构建二叉树
+                m_tree.emplace_back(rightNode);
+
+                //记录数据
+                m_nodeCount += 2;
+                m_leafCount += 1;
+            }
+            depth_curr++;
+        }
+
+        m_maxDepth = depth_curr;
+
+        auto over = std::chrono::high_resolution_clock::now();
+        auto time = std::chrono::duration_cast<std::chrono::milliseconds>(over - start).count();
+
         std::cout << "build time: " << time << std::endl;
         std::cout << "max depth: " << m_maxDepth << std::endl;
         std::cout << "node count: " << m_nodeCount << std::endl;
         std::cout << "leaf count: " << m_leafCount << std::endl;
     }
 
-
-    void Accel::addBVHNode(uint32_t index) {
-
-        float cost_min = std::numeric_limits<float>::infinity();
-
-        uint32_t index_min_cost = 0;
-
-        uint32_t bucket = 10;
-
-        //图元的包围盒
-        auto box = m_mesh->getBoundingBox(index);
-        //辅助队列，存储二叉树节点的索引
-        std::queue<uint32_t> q;
-
-        //添加根节点
-        q.push(0);
-
-        uint32_t depth = 0;
-
-        //构建二叉树
-        while (!q.empty()) {
-            uint32_t n = q.size();
-            //层次遍历
-            for (uint32_t k = 0; k < n; k++) {
-                //出队列
-                auto ptr = q.front();
-                q.pop();
-
-                //节点包围盒未覆盖图元
-                if (!m_BVH[ptr].bbox.overlaps(box)) {
-                    continue;
-                }
-
-                m_maxDepth = std::max(m_maxDepth, depth);
-
-                //节点为叶子节点
-                if (m_BVH[ptr].child == 0) {
-                    m_BVH[ptr].indices.emplace_back(index);
-
-                    //节点持有的图元数量不足以继续分裂
-                    if (m_BVH[ptr].indices.size() < COUNT_MIN) {
-                        continue;
-                    }
-
-                    //二叉树构建深度超过了最大深度
-                    if (depth >= DEPTH_MAX) {
-                        continue;
-                    }
-
-                    //叶子节点可以作为父节点，并分裂出两个
-
-                    m_nodeCount += 2;
-                    m_leafCount += 1;
-
-                    //构造子节点
-
-                    //由相对索引得到节点的绝对索引
-                    m_BVH[ptr].child = m_BVH.size();
-
-                    //获取包围盒的最长轴
-                    uint32_t dimension = m_BVH[ptr].bbox.getMajorAxis();
-
-                    //按最长维度进行排序
-                    std::vector<uint32_t> faces(m_mesh->getTriangleCount());
-
-                    for (int i = 0; i < faces.size(); i++) {
-                        faces[i] = i;
-                    }
-
-                    switch (dimension) {
-                        case 0:
-                            std::sort(
-                                    faces.begin(),
-                                    faces.end(),
-                                    [this](uint32_t f1, uint32_t f2) {
-                                        return m_mesh->getBoundingBox(f1).getCenter()[0] < m_mesh->getBoundingBox(f2).getCenter()[0];
-                                    }
-                            );
-                            break;
-                        case 1:
-                            std::sort(
-                                    faces.begin(),
-                                    faces.end(),
-                                    [this](uint32_t f1, uint32_t f2) {
-                                        return m_mesh->getBoundingBox(f1).getCenter()[1] < m_mesh->getBoundingBox(f2).getCenter()[1];
-                                    }
-                            );
-                            break;
-                        case 2:
-                            std::sort(
-                                    faces.begin(),
-                                    faces.end(),
-                                    [this](uint32_t f1, uint32_t f2) {
-                                        return m_mesh->getBoundingBox(f1).getCenter()[2] < m_mesh->getBoundingBox(f2).getCenter()[2];
-                                    }
-                            );
-                        default:
-                            break;
-
-                    }
-                    //在维度上分桶
-
-                    for (uint32_t i = 1; i < bucket; i++) {
-                        auto start = faces.begin();
-                        auto mid = faces.begin() + faces.size() * i / bucket;
-                        auto end = faces.end();
-
-
-                        auto lefts = std::vector<uint32_t>(start, mid);
-                        auto rights = std::vector<uint32_t>(mid, end);
-
-
-                        BoundingBox3f bbox_left;
-                        BoundingBox3f bbox_right;
-
-
-                        for (auto left: lefts) {
-                            bbox_left = BoundingBox3f::merge(bbox_left, m_mesh->getBoundingBox(left));
-                        }
-                        for (auto right: rights) {
-                            bbox_right = BoundingBox3f::merge(bbox_right, m_mesh->getBoundingBox(right));
-                        }
-
-
-                        auto S_left = bbox_left.getSurfaceArea();
-                        auto S_right = bbox_left.getSurfaceArea();
-                        auto S_all = m_BVH[ptr].bbox.getSurfaceArea();
-
-                        auto cost = 0.125f + lefts.size() * S_left / S_all + rights.size() * S_right / S_all;
-
-
-                        if (cost < cost_min) {
-                            cost_min = cost;
-                            index_min_cost = i;
-                        }
-                    }
-
-                    auto start = faces.begin();
-                    auto mid = faces.begin() + faces.size() * index_min_cost / bucket;
-                    auto end = faces.end();
-
-                    auto lefts = std::vector<uint32_t>(start, mid);
-                    auto rights = std::vector<uint32_t>(mid, end);
-
-                    BoundingBox3f bbox_left;
-                    BoundingBox3f bbox_right;
-
-                    for (auto f: lefts) {
-                        bbox_left = BoundingBox3f::merge(bbox_left, m_mesh->getBoundingBox(f));
-                    }
-                    for (auto f: rights) {
-                        bbox_right = BoundingBox3f::merge(bbox_right, m_mesh->getBoundingBox(f));
-                    }
-
-                    std::cout << bbox_left.toString() << "\n";
-                    std::cout << bbox_right.toString() << "\n";
-
-                    BVHNode leftNode(bbox_left);
-                    BVHNode rightNode(bbox_right);
-
-                    //图元转移到子节点
-                    leftNode.indices = lefts;
-                    rightNode.indices = rights;
-
-                    //清理父节点的图元所占内存空间
-                    m_BVH[ptr].indices.clear();
-                    m_BVH[ptr].indices.shrink_to_fit();
-
-                    m_BVH.emplace_back(leftNode);
-                    m_BVH.emplace_back(rightNode);
-
-
-                } else {
-                    //子节点索引都入队列
-                    q.push(m_BVH[ptr].child);
-                    q.push(m_BVH[ptr].child + 1);
-                }
-            }
-            depth++;
-        }
-    }
 
     bool Accel::rayIntersect(const Ray3f &ray_, Intersection &its, bool shadowRay) const {
         bool foundIntersection = false;  // Was an intersection found so far?
@@ -418,7 +374,7 @@ NORI_NAMESPACE_BEGIN
     }
 
     bool Accel::traverseOctTree(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const {
-        auto &node = m_octTree[n];
+        auto &node = m_tree[n];
 
         //当前节点包围盒与射线碰撞
         if (!node.bbox.rayIntersect(ray)) {
@@ -450,7 +406,7 @@ NORI_NAMESPACE_BEGIN
             for (uint32_t i = 0; i < 8; i++) {
                 auto ptr = node.child + i;
                 //求出节点到光线原点的距离
-                children[i] = {ptr, m_octTree[ptr].bbox.distanceTo(ray.o)};
+                children[i] = {ptr, m_tree[ptr].bbox.distanceTo(ray.o)};
             }
             //按子节点距离排序
             std::sort(
@@ -472,7 +428,7 @@ NORI_NAMESPACE_BEGIN
     }
 
     bool Accel::traverseBVH(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const {
-        auto &node = m_BVH[n];
+        auto &node = m_tree[n];
 
         //当前节点包围盒与射线碰撞
         if (!node.bbox.rayIntersect(ray)) {
@@ -483,7 +439,6 @@ NORI_NAMESPACE_BEGIN
 
         //节点为叶子节点
         if (node.child == 0) {
-
             float u, v, t;
             //遍历节点内的图元
             for (auto i: node.indices) {
