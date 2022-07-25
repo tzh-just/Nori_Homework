@@ -1,0 +1,7 @@
+.idea
+build
+ext
+.github
+scenes
+.gitmodules
+CMakeLists.txt
