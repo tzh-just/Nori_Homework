@@ -18,9 +18,10 @@ NORI_NAMESPACE_BEGIN
         m_bbox = m_mesh->getBoundingBox();
     }
 
-#define OctTree
+#define NONE
 
     void Accel::build() {
+
 #ifdef BVH
         buildBVH();
 #endif
@@ -295,12 +296,13 @@ NORI_NAMESPACE_BEGIN
 
         Ray3f ray(ray_); /// Make a copy of the ray (we will need to update its '.maxt' value)
 
-        /* Brute force search through all triangles */
-/*        for (uint32_t idx = 0; idx < m_mesh->getTriangleCount(); ++idx) {
+#ifdef BVH
+        //Brute force search through all triangles
+        for (uint32_t idx = 0; idx < m_mesh->getTriangleCount(); ++idx) {
             float u, v, t;
             if (m_mesh->rayIntersect(idx, ray, u, v, t)) {
-                *//* An intersection was found! Can terminate
-                   immediately if this is a shadow ray query *//*
+                //An intersection was found! Can terminate
+                //immediately if this is a shadow ray query
                 if (shadowRay)
                     return true;
                 ray.maxt = its.t = t;
@@ -309,7 +311,9 @@ NORI_NAMESPACE_BEGIN
                 f = idx;
                 foundIntersection = true;
             }
-        }*/
+        }
+#endif
+
 #ifdef BVH
         foundIntersection = traverseBVH(0, ray, its, f, shadowRay);
 #endif
