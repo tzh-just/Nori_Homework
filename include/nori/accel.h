@@ -101,7 +101,7 @@ NORI_NAMESPACE_BEGIN
         static constexpr uint32_t DEPTH_BVH_MAX = 32;
         static constexpr uint32_t COUNT_BUCKET = 10;
 
-        AccelMode mode = AccelMode::OctTree;
+        AccelMode mode = AccelMode::SAH;
     };
 
 NORI_NAMESPACE_END

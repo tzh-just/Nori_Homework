@@ -18,42 +18,32 @@ NORI_NAMESPACE_BEGIN
     }
 
     void Accel::build() {
-
-        if (!m_mesh) return;
-
-        mode = AccelMode::SAH;
+        if (!m_mesh || mode == AccelMode::NONE) return;
 
         auto start = std::chrono::high_resolution_clock::now();
 
         m_tree.clear();
-
         auto root = AccelNode(m_mesh->getBoundingBox(), m_mesh->getTriangleCount());
-
         for (int i = 0; i < root.indices.size(); i++) {
             root.indices[i] = i;
         }
-
-        //添加根节点
         m_tree.emplace_back(root);
 
-        //辅助队列，存储八叉树节点的索引
         std::queue<uint32_t> q;
         q.push(0);
-
-        //构建二叉树
         while (!q.empty()) {
-            //层次遍历
-            uint32_t n = q.size();
+            uint32_t n = q.size();//层次遍历
             for (uint32_t k = 0; k < n; k++) {
-
-                //出队
                 auto ptr = q.front();
                 q.pop();
-
-                if (mode == AccelMode::SAH) {
-                    buildSAH(q, ptr);
-                } else if (mode == AccelMode::OctTree) {
-                    buildOctTree(q, ptr);
+                switch (mode) {
+                    default:
+                    case AccelMode::SAH:
+                        buildSAH(q, ptr);
+                        break;
+                    case AccelMode::OctTree:
+                        buildOctTree(q, ptr);
+                        break;
                 }
             }
             m_depth_tree++;
@@ -104,7 +94,7 @@ NORI_NAMESPACE_BEGIN
             return;
 
         m_tree[nodeIndex].child = m_tree.size();
-        uint32_t dimension = m_tree[nodeIndex].bbox.getMajorAxis();
+        uint32_t dimension = m_tree[nodeIndex].bbox.getMajorAxis();//在最长维度排序
         std::sort(
                 m_tree[nodeIndex].indices.begin(),
                 m_tree[nodeIndex].indices.end(),
@@ -113,52 +103,42 @@ NORI_NAMESPACE_BEGIN
                            m_mesh->getBoundingBox(f2).getCenter()[dimension];
                 }
         );
-        uint32_t index_bucket = 1;
+
         float cost_min = std::numeric_limits<float>::infinity(); //分桶
+        AccelNode leftNode, rightNode;
+        std::vector<uint32_t> faces_left, faces_right;
+
         for (uint32_t i = 1; i < COUNT_BUCKET; i++) {
             auto begin_bucket = m_tree[nodeIndex].indices.begin();
             auto mid_bucket = m_tree[nodeIndex].indices.begin() + (static_cast<uint32_t>(m_tree[nodeIndex].indices.size()) * i / COUNT_BUCKET);
             auto end_bucket = m_tree[nodeIndex].indices.end();
-            auto faces_left = std::vector<uint32_t>(begin_bucket, mid_bucket);
-            auto faces_right = std::vector<uint32_t>(mid_bucket, end_bucket);
+            faces_left = std::vector<uint32_t>(begin_bucket, mid_bucket);
+            faces_right = std::vector<uint32_t>(mid_bucket, end_bucket);
 
             BoundingBox3f bbox_left, bbox_right;
-            for (auto left: faces_left) {
-                bbox_left = BoundingBox3f::merge(bbox_left, m_mesh->getBoundingBox(left));
-            }
-            for (auto right: faces_right) {
-                bbox_right = BoundingBox3f::merge(bbox_right, m_mesh->getBoundingBox(right));
-            }
 
-            auto S_LEFT = bbox_left.getSurfaceArea();
-            auto S_RIGHT = bbox_right.getSurfaceArea();
-            auto S_ALL = m_tree[nodeIndex].bbox.getSurfaceArea();
-            auto cost = 0.125f +
+            //合并包围盒
+            for (auto left: faces_left)
+                bbox_left.expandBy(m_mesh->getBoundingBox(left));
+
+            for (auto right: faces_right)
+                bbox_right.expandBy(m_mesh->getBoundingBox(right));
+
+            float S_LEFT = bbox_left.getSurfaceArea();
+            float S_RIGHT = bbox_right.getSurfaceArea();
+            float S_ALL = m_tree[nodeIndex].bbox.getSurfaceArea();
+            float cost = 0.125f +
                         static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
                         static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
+
             if (cost < cost_min) {
                 cost_min = cost;
-                index_bucket = i;
+                leftNode.bbox = std::move(bbox_left);
+                leftNode.indices = std::move(faces_left);
+                rightNode.bbox = std::move(bbox_right);
+                rightNode.indices = std::move(faces_right);
             }
         }
-        auto begin = m_tree[nodeIndex].indices.begin();
-        auto mid = m_tree[nodeIndex].indices.begin() + (static_cast<uint32_t>(m_tree[nodeIndex].indices.size()) * index_bucket / COUNT_BUCKET);
-        auto end = m_tree[nodeIndex].indices.end();
-        auto faces_left = std::vector<uint32_t>(begin, mid);
-        auto faces_right = std::vector<uint32_t>(mid, end);
-
-        BoundingBox3f bbox_left, bbox_right;
-        for (auto left: faces_left) {
-            bbox_left.expandBy(m_mesh->getBoundingBox(left));
-        }
-        for (auto right: faces_right) {
-            bbox_right.expandBy(m_mesh->getBoundingBox(right));
-        }
-
-        AccelNode leftNode(bbox_left);
-        AccelNode rightNode(bbox_right);
-        leftNode.indices = faces_left;
-        rightNode.indices = faces_right;
 
         q.push(m_tree.size());
         m_tree.emplace_back(leftNode);
@@ -177,28 +157,32 @@ NORI_NAMESPACE_BEGIN
         Ray3f ray(ray_); /// Make a copy of the ray (we will need to update its '.maxt' value)
 
 
-        if (mode == AccelMode::NONE) {
-            //Brute force search through all triangles
-            for (uint32_t idx = 0; idx < m_mesh->getTriangleCount(); ++idx) {
-                float u, v, t;
-                if (m_mesh->rayIntersect(idx, ray, u, v, t)) {
-                    //An intersection was found! Can terminate
-                    //immediately if this is a shadow ray query
-                    if (shadowRay)
-                        return true;
-                    ray.maxt = its.t = t;
-                    its.uv = Point2f(u, v);
-                    its.mesh = m_mesh;
-                    f = idx;
-                    foundIntersection = true;
+        switch (mode) {
+            case AccelMode::NONE:
+                //Brute force search through all triangles
+                for (uint32_t idx = 0; idx < m_mesh->getTriangleCount(); ++idx) {
+                    float u, v, t;
+                    if (m_mesh->rayIntersect(idx, ray, u, v, t)) {
+                        //An intersection was found! Can terminate
+                        //immediately if this is a shadow ray query
+                        if (shadowRay)
+                            return true;
+                        ray.maxt = its.t = t;
+                        its.uv = Point2f(u, v);
+                        its.mesh = m_mesh;
+                        f = idx;
+                        foundIntersection = true;
+                    }
                 }
-            }
-        } else if (mode == AccelMode::SAH) {
-            foundIntersection = traverseBVH(0, ray, its, f, shadowRay);
-        } else if (mode == AccelMode::OctTree) {
-            foundIntersection = traverseOctTree(0, ray, its, f, shadowRay);
+                break;
+            case AccelMode::OctTree:
+                foundIntersection = traverseOctTree(0, ray, its, f, shadowRay);
+                break;
+            default:
+            case AccelMode::SAH:
+                foundIntersection = traverseBVH(0, ray, its, f, shadowRay);
+                break;
         }
-
 
         if (foundIntersection) {
             /* At this point, we now know that there is an intersection,
