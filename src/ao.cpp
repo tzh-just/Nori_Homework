@@ -16,8 +16,7 @@ NORI_NAMESPACE_BEGIN
             auto pdf = Warp::squareToCosineHemispherePdf(dir);
             dir = its.shFrame.toWorld(dir);
 
-            Intersection shadowIts;
-            if (scene->rayIntersect(Ray3f(its.p + dir * Epsilon, dir),shadowIts))//可见性
+            if (scene->rayIntersect(Ray3f(its.p + dir * Epsilon, dir)))//可见性
                 return {0.0f};
 
             //Li/pi * cos_theta / pdf

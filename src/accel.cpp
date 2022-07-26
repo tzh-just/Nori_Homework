@@ -128,8 +128,8 @@ NORI_NAMESPACE_BEGIN
             float S_RIGHT = bbox_right.getSurfaceArea();
             float S_ALL = m_tree[nodeIndex].bbox.getSurfaceArea();
             float cost = 0.125f +
-                        static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
-                        static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
+                         static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
+                         static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
 
             if (cost < cost_min) {
                 cost_min = cost;
@@ -183,6 +183,9 @@ NORI_NAMESPACE_BEGIN
                 foundIntersection = traverseBVH(0, ray, its, f, shadowRay);
                 break;
         }
+
+        if (shadowRay)
+            return foundIntersection;
 
         if (foundIntersection) {
             /* At this point, we now know that there is an intersection,
@@ -244,9 +247,8 @@ NORI_NAMESPACE_BEGIN
         auto &node = m_tree[n];
 
         //当前节点包围盒与射线碰撞
-        if (!node.bbox.rayIntersect(ray)) {
+        if (!node.bbox.rayIntersect(ray))
             return false;
-        }
 
         bool isHit = false;
 

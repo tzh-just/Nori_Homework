@@ -21,8 +21,7 @@ NORI_NAMESPACE_BEGIN
 
             Vector3f L = m_position - its.p;//光源方向
 
-            Intersection shadowIts;
-            if (scene->rayIntersect(Ray3f(its.p + L * Epsilon, L), shadowIts))//可见性
+            if (scene->rayIntersect(Ray3f(its.p + L * Epsilon, L)))//可见性
                 return {0.0f};
 
             //直接光照：Phi/4pi*pi * cos_theta/||x-p||^2 * V(x<->p)
