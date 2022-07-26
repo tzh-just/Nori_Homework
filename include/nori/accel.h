@@ -6,11 +6,20 @@
 
 #pragma once
 
+#include <queue>
+
 #include <nori/mesh.h>
 
 #include <utility>
 
 NORI_NAMESPACE_BEGIN
+
+    enum AccelMode {
+        NONE = 0,
+        OctTree = 1,
+        BVH = 2,
+        SAH = 3
+    };
 
     struct AccelNode {
         uint32_t child = 0;
@@ -45,9 +54,9 @@ NORI_NAMESPACE_BEGIN
         /// Build the acceleration data structure (currently a no-op)
         void build();
 
-        void buildOctTree();
+        void buildOctTree(std::queue<uint32_t> &q, uint32_t nodeIndex);
 
-        void buildBVH();
+        void buildSAH(std::queue<uint32_t> &q, uint32_t nodeIndex);
 
 
         bool traverseOctTree(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const;
@@ -82,13 +91,17 @@ NORI_NAMESPACE_BEGIN
         Mesh *m_mesh = nullptr; ///< Mesh (only a single one for now)
         BoundingBox3f m_bbox;           ///< Bounding box of the entire scene
         std::vector<AccelNode> m_tree;
-        uint32_t m_maxDepth = 1;//最大深度
-        uint32_t m_leafCount = 1;//叶子节点数量
-        uint32_t m_nodeCount = 1;//节点总数
+
+        uint32_t m_depth_tree = 1;
+        uint32_t m_count_leaf = 1;
+        uint32_t m_count_node = 1;
 
         static constexpr uint32_t COUNT_MIN = 16;
         static constexpr uint32_t DEPTH_OCT_MAX = 12;
         static constexpr uint32_t DEPTH_BVH_MAX = 32;
+        static constexpr uint32_t COUNT_BUCKET = 10;
+
+        AccelMode mode = AccelMode::OctTree;
     };
 
 NORI_NAMESPACE_END

@@ -5,7 +5,6 @@
 */
 
 #include <chrono>
-#include <queue>
 #include <nori/accel.h>
 #include <Eigen/Geometry>
 
@@ -18,21 +17,11 @@ NORI_NAMESPACE_BEGIN
         m_bbox = m_mesh->getBoundingBox();
     }
 
-#define NONE
-
     void Accel::build() {
 
-#ifdef BVH
-        buildBVH();
-#endif
-
-#ifdef OctTree
-        buildOctTree();
-#endif
-    }
-
-    void Accel::buildOctTree() {
         if (!m_mesh) return;
+
+        mode = AccelMode::SAH;
 
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -50,113 +39,6 @@ NORI_NAMESPACE_BEGIN
         //辅助队列，存储八叉树节点的索引
         std::queue<uint32_t> q;
         q.push(0);
-
-        //基本数据
-        uint32_t depth_curr = 1;
-
-        //构建八叉树
-        while (!q.empty()) {
-            //层次遍历
-            uint32_t n = q.size();
-            for (uint32_t k = 0; k < n; k++) {
-
-                //出队
-                auto ptr = q.front();
-                q.pop();
-
-                //节点持有的图元数量不足以继续分裂
-                if (m_tree[ptr].indices.size() < COUNT_MIN) {
-                    continue;
-                }
-
-                //八叉树构建深度超过了最大深度
-                if (depth_curr >= DEPTH_OCT_MAX) {
-                    continue;
-                }
-
-                //设置子节点索引
-                m_tree[ptr].child = m_tree.size();
-
-                //预备数据
-                //-----------------------------------------------------------
-
-                //获取节点包围盒的中心点
-                Vector3f center = m_tree[ptr].bbox.getCenter();
-
-                //计算节点分裂的八个子节点包围盒
-                for (uint32_t i = 0; i < 8; i++) {
-                    //获取包围盒中心点和拐角点左边
-
-                    Vector3f corner = m_tree[ptr].bbox.getCorner(i);
-
-                    //计算子包围盒范围
-                    Vector3f minPoint, maxPoint;
-                    for (uint32_t j = 0; j < 3; j++) {
-                        minPoint[j] = std::min(center[j], corner[j]);
-                        maxPoint[j] = std::max(center[j], corner[j]);
-                    }
-
-                    //生成子包围盒
-                    BoundingBox3f bbox_sub(minPoint, maxPoint);
-
-                    //生成子节点
-                    AccelNode node_sub(bbox_sub);
-
-                    //遍历节点持有的所有图元
-                    for (auto face: m_tree[ptr].indices)
-                        //判断子节点是否覆盖图元
-                        if (bbox_sub.overlaps(m_mesh->getBoundingBox(face)))
-                            node_sub.indices.emplace_back(face);
-
-                    //入队
-                    q.push(m_tree.size());
-                    //构建二叉树
-                    m_tree.emplace_back(node_sub);
-                }
-
-                //记录数据
-                m_nodeCount += 8;
-                m_leafCount += 7;
-            }
-            depth_curr++;
-        }
-
-        m_maxDepth = depth_curr;
-
-        auto over = std::chrono::high_resolution_clock::now();
-        auto time = std::chrono::duration_cast<std::chrono::milliseconds>(over - start).count();
-
-        std::cout << "build time: " << time << std::endl;
-        std::cout << "max depth: " << m_maxDepth << std::endl;
-        std::cout << "node count: " << m_nodeCount << std::endl;
-        std::cout << "leaf count: " << m_leafCount << std::endl;
-    }
-
-
-    void Accel::buildBVH() {
-        if (!m_mesh) return;
-
-        auto start = std::chrono::high_resolution_clock::now();
-
-        m_tree.clear();
-
-        auto root = AccelNode(m_mesh->getBoundingBox(), m_mesh->getTriangleCount());
-
-        for (int i = 0; i < root.indices.size(); i++) {
-            root.indices[i] = i;
-        }
-
-        //添加根节点
-        m_tree.emplace_back(root);
-
-        //辅助队列，存储八叉树节点的索引
-        std::queue<uint32_t> q;
-        q.push(0);
-
-        //基本数据
-        float cost_min = std::numeric_limits<float>::infinity();
-        uint32_t count_bucket = 10;
-        uint32_t depth_curr = 1;
 
         //构建二叉树
         while (!q.empty()) {
@@ -168,125 +50,123 @@ NORI_NAMESPACE_BEGIN
                 auto ptr = q.front();
                 q.pop();
 
-                //节点持有的图元数量不足以继续分裂
-                if (m_tree[ptr].indices.size() < COUNT_MIN) {
-                    continue;
+                if (mode == AccelMode::SAH) {
+                    buildSAH(q, ptr);
+                } else if (mode == AccelMode::OctTree) {
+                    buildOctTree(q, ptr);
                 }
-
-                //八叉树构建深度超过了最大深度
-                if (depth_curr >= DEPTH_BVH_MAX) {
-                    continue;
-                }
-
-                //设置子节点索引
-                m_tree[ptr].child = m_tree.size();
-
-                //预备数据
-                //-----------------------------------------------------------
-
-                //获取包围盒的最长轴
-                uint32_t dimension = m_tree[ptr].bbox.getMajorAxis();
-
-                std::sort(
-                        m_tree[ptr].indices.begin(),
-                        m_tree[ptr].indices.end(),
-                        [this, dimension](uint32_t f1, uint32_t f2) {
-                            return m_mesh->getBoundingBox(f1).getCenter()[dimension] <
-                                   m_mesh->getBoundingBox(f2).getCenter()[dimension];
-                        }
-                );
-
-                uint32_t index_bucket;
-                //在最长维度上分桶
-                for (uint32_t i = 1; i < count_bucket; i++) {
-                    auto begin_bucket = m_tree[ptr].indices.begin();
-                    auto mid_bucket = m_tree[ptr].indices.begin() + (static_cast<uint32_t>(m_tree[ptr].indices.size()) * i / count_bucket);
-                    auto end_bucket = m_tree[ptr].indices.end();
-
-                    //左右两侧包围盒内图元索引数组
-                    auto faces_left = std::vector<uint32_t>(begin_bucket, mid_bucket);
-                    auto faces_right = std::vector<uint32_t>(mid_bucket, end_bucket);
-
-                    //重置包围盒
-                    BoundingBox3f bbox_left, bbox_right;
-
-                    //遍历左右两侧包围盒内图元，合并图元的包围盒
-                    for (auto left: faces_left) {
-                        bbox_left = BoundingBox3f::merge(bbox_left, m_mesh->getBoundingBox(left));
-                    }
-                    for (auto right: faces_right) {
-                        bbox_right = BoundingBox3f::merge(bbox_right, m_mesh->getBoundingBox(right));
-                    }
-
-                    //获取左右两侧包围盒的表面积
-                    auto S_LEFT = bbox_left.getSurfaceArea();
-                    auto S_RIGHT = bbox_right.getSurfaceArea();
-
-                    //获取节点包围盒的表面积
-                    auto S_ALL = m_tree[ptr].bbox.getSurfaceArea();
-
-                    //计算本次分桶的成本
-                    auto cost = 0.125f +
-                                static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
-                                static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
-
-                    //留下最小成本的分桶位置
-                    if (cost < cost_min) {
-                        cost_min = cost;
-                        index_bucket = i;
-                    }
-                }
-
-                auto begin = m_tree[ptr].indices.begin();
-                auto mid = m_tree[ptr].indices.begin() + (static_cast<uint32_t>(m_tree[ptr].indices.size()) * index_bucket / count_bucket);
-                auto end = m_tree[ptr].indices.end();
-
-                //左右两侧包围盒内图元索引数组
-                auto faces_left = std::vector<uint32_t>(begin, mid);
-                auto faces_right = std::vector<uint32_t>(mid, end);
-
-                //重置包围盒
-                BoundingBox3f bbox_left, bbox_right;
-
-                //遍历左右两侧包围盒内图元，合并图元的包围盒
-                for (auto left: faces_left) {
-                    bbox_left.expandBy(m_mesh->getBoundingBox(left));
-                }
-                for (auto right: faces_right) {
-                    bbox_right.expandBy(m_mesh->getBoundingBox(right));
-                }
-
-                AccelNode leftNode(bbox_left);
-                AccelNode rightNode(bbox_right);
-
-                leftNode.indices = faces_left;
-                rightNode.indices = faces_right;
-
-                //入队
-                q.push(m_tree.size());
-                //构建二叉树
-                m_tree.emplace_back(leftNode);
-                //入队
-                q.push(m_tree.size());
-                //构建二叉树
-                m_tree.emplace_back(rightNode);
-
-                //记录数据
-                m_nodeCount += 2;
-                m_leafCount += 1;
             }
-            depth_curr++;
+            m_depth_tree++;
         }
-
-        m_maxDepth = depth_curr;
 
         auto over = std::chrono::high_resolution_clock::now();
         auto time = std::chrono::duration_cast<std::chrono::milliseconds>(over - start).count();
 
-        std::cout << "build time: " << time << std::endl;
-        std::cout << "max depth: " << m_maxDepth << std::endl;
-        std::cout << "node count: " << m_nodeCount << std::endl;
-        std::cout << "leaf count: " << m_leafCount << std::endl;
+        std::cout << "[time to build the tree]: " << time << "ms" << std::endl;
+        std::cout << "[max depth of the tree]: " << m_depth_tree << std::endl;
+        std::cout << "[node count of the tree]: " << m_count_node << std::endl;
+        std::cout << "[leaf count of the tree]: " << m_count_leaf << std::endl;
+    }
+
+    void Accel::buildOctTree(std::queue<uint32_t> &q, uint32_t nodeIndex) {
+        if (m_tree[nodeIndex].indices.size() < COUNT_MIN)
+            return;
+        if (m_depth_tree > DEPTH_OCT_MAX)
+            return;
+
+        m_tree[nodeIndex].child = m_tree.size();
+        Vector3f center = m_tree[nodeIndex].bbox.getCenter();
+        for (uint32_t i = 0; i < 8; i++) {
+            Vector3f corner = m_tree[nodeIndex].bbox.getCorner(i);
+            Vector3f minPoint, maxPoint;
+            for (uint32_t j = 0; j < 3; j++) {
+                minPoint[j] = std::min(center[j], corner[j]);
+                maxPoint[j] = std::max(center[j], corner[j]);
+            }
+
+            BoundingBox3f bbox_sub(minPoint, maxPoint);
+            AccelNode node_sub(bbox_sub);
+            for (auto face: m_tree[nodeIndex].indices)
+                if (bbox_sub.overlaps(m_mesh->getBoundingBox(face)))
+                    node_sub.indices.emplace_back(face);
+
+            q.push(m_tree.size());
+            m_tree.emplace_back(node_sub);
+        }
+        m_count_node += 8;
+        m_count_leaf += 7;
+    }
+
+    void Accel::buildSAH(std::queue<uint32_t> &q, uint32_t nodeIndex) {
+        if (m_tree[nodeIndex].indices.size() < COUNT_MIN)
+            return;
+        if (m_depth_tree > DEPTH_BVH_MAX)
+            return;
+
+        m_tree[nodeIndex].child = m_tree.size();
+        uint32_t dimension = m_tree[nodeIndex].bbox.getMajorAxis();
+        std::sort(
+                m_tree[nodeIndex].indices.begin(),
+                m_tree[nodeIndex].indices.end(),
+                [this, dimension](uint32_t f1, uint32_t f2) {
+                    return m_mesh->getBoundingBox(f1).getCenter()[dimension] <
+                           m_mesh->getBoundingBox(f2).getCenter()[dimension];
+                }
+        );
+        uint32_t index_bucket = 1;
+        float cost_min = std::numeric_limits<float>::infinity(); //分桶
+        for (uint32_t i = 1; i < COUNT_BUCKET; i++) {
+            auto begin_bucket = m_tree[nodeIndex].indices.begin();
+            auto mid_bucket = m_tree[nodeIndex].indices.begin() + (static_cast<uint32_t>(m_tree[nodeIndex].indices.size()) * i / COUNT_BUCKET);
+            auto end_bucket = m_tree[nodeIndex].indices.end();
+            auto faces_left = std::vector<uint32_t>(begin_bucket, mid_bucket);
+            auto faces_right = std::vector<uint32_t>(mid_bucket, end_bucket);
+
+            BoundingBox3f bbox_left, bbox_right;
+            for (auto left: faces_left) {
+                bbox_left = BoundingBox3f::merge(bbox_left, m_mesh->getBoundingBox(left));
+            }
+            for (auto right: faces_right) {
+                bbox_right = BoundingBox3f::merge(bbox_right, m_mesh->getBoundingBox(right));
+            }
+
+            auto S_LEFT = bbox_left.getSurfaceArea();
+            auto S_RIGHT = bbox_right.getSurfaceArea();
+            auto S_ALL = m_tree[nodeIndex].bbox.getSurfaceArea();
+            auto cost = 0.125f +
+                        static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
+                        static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
+            if (cost < cost_min) {
+                cost_min = cost;
+                index_bucket = i;
+            }
+        }
+        auto begin = m_tree[nodeIndex].indices.begin();
+        auto mid = m_tree[nodeIndex].indices.begin() + (static_cast<uint32_t>(m_tree[nodeIndex].indices.size()) * index_bucket / COUNT_BUCKET);
+        auto end = m_tree[nodeIndex].indices.end();
+        auto faces_left = std::vector<uint32_t>(begin, mid);
+        auto faces_right = std::vector<uint32_t>(mid, end);
+
+        BoundingBox3f bbox_left, bbox_right;
+        for (auto left: faces_left) {
+            bbox_left.expandBy(m_mesh->getBoundingBox(left));
+        }
+        for (auto right: faces_right) {
+            bbox_right.expandBy(m_mesh->getBoundingBox(right));
+        }
+
+        AccelNode leftNode(bbox_left);
+        AccelNode rightNode(bbox_right);
+        leftNode.indices = faces_left;
+        rightNode.indices = faces_right;
+
+        q.push(m_tree.size());
+        m_tree.emplace_back(leftNode);
+        q.push(m_tree.size());
+        m_tree.emplace_back(rightNode);
+
+        m_count_node += 2;
+        m_count_leaf += 1;
     }
 
 
@@ -296,31 +176,30 @@ NORI_NAMESPACE_BEGIN
 
         Ray3f ray(ray_); /// Make a copy of the ray (we will need to update its '.maxt' value)
 
-#ifdef BVH
-        //Brute force search through all triangles
-        for (uint32_t idx = 0; idx < m_mesh->getTriangleCount(); ++idx) {
-            float u, v, t;
-            if (m_mesh->rayIntersect(idx, ray, u, v, t)) {
-                //An intersection was found! Can terminate
-                //immediately if this is a shadow ray query
-                if (shadowRay)
-                    return true;
-                ray.maxt = its.t = t;
-                its.uv = Point2f(u, v);
-                its.mesh = m_mesh;
-                f = idx;
-                foundIntersection = true;
+
+        if (mode == AccelMode::NONE) {
+            //Brute force search through all triangles
+            for (uint32_t idx = 0; idx < m_mesh->getTriangleCount(); ++idx) {
+                float u, v, t;
+                if (m_mesh->rayIntersect(idx, ray, u, v, t)) {
+                    //An intersection was found! Can terminate
+                    //immediately if this is a shadow ray query
+                    if (shadowRay)
+                        return true;
+                    ray.maxt = its.t = t;
+                    its.uv = Point2f(u, v);
+                    its.mesh = m_mesh;
+                    f = idx;
+                    foundIntersection = true;
+                }
             }
+        } else if (mode == AccelMode::SAH) {
+            foundIntersection = traverseBVH(0, ray, its, f, shadowRay);
+        } else if (mode == AccelMode::OctTree) {
+            foundIntersection = traverseOctTree(0, ray, its, f, shadowRay);
         }
-#endif
 
-#ifdef BVH
-        foundIntersection = traverseBVH(0, ray, its, f, shadowRay);
-#endif
 
-#ifdef OctTree
-        foundIntersection = traverseOctTree(0, ray, its, f, shadowRay);
-#endif
         if (foundIntersection) {
             /* At this point, we now know that there is an intersection,
                and we know the triangle index of the closest such intersection.
