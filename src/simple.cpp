@@ -20,17 +20,18 @@ NORI_NAMESPACE_BEGIN
                 return {0.0f};
 
             Vector3f L = m_position - its.p;//光源方向
-            Intersection shadowIts;//可见性
-            if (scene->rayIntersect(Ray3f(its.p + L * Epsilon, L), shadowIts))
+
+            Intersection shadowIts;
+            if (scene->rayIntersect(Ray3f(its.p + L * Epsilon, L), shadowIts))//可见性
                 return {0.0f};
 
-            //Phi/4pi*pi * max(0, cos_theta)/||x-p||^2 * V(x<->p)
+            //直接光照：Phi/4pi*pi * cos_theta/||x-p||^2 * V(x<->p)
             return 0.25f * INV_PI * INV_PI * m_energy * std::max(0.0f, its.shFrame.n.dot(L.normalized())) / L.dot(L);
         }
 
         std::string toString() const {
             return tfm::format(
-                    "Diffuse[\n"
+                    "SimpleIntegrator[\n"
                     "  position = %s\n"
                     "  energy = %s\n"
                     "]", m_position.toString(), m_energy.toString());
