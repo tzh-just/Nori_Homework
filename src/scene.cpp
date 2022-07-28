@@ -14,7 +14,8 @@
 NORI_NAMESPACE_BEGIN
 
 Scene::Scene(const PropertyList &) {
-    m_accel = new Accel();
+    m_accel = new BVH();
+    //m_accel = new OctTree();
 }
 
 Scene::~Scene() {
