@@ -33,9 +33,11 @@ class Accel {
 
   bool rayIntersect(const Ray3f &ray, Intersection &its, bool shadowRay) const;
 
-  virtual bool divide(uint32_t nodeIndex, std::vector<AccelNode> *children) = 0;
+  virtual void divide(uint32_t n, std::vector<AccelNode> *children) = 0;
 
   virtual bool traverse(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const = 0;
+
+  virtual std::pair<uint32_t,uint32_t> getLimits() const = 0;
 
   const BoundingBox3f &getBoundingBox() { return m_bbox; }
 
@@ -44,28 +46,30 @@ class Accel {
   BoundingBox3f m_bbox;
   std::vector<AccelNode> m_tree;
 
-  uint32_t m_depth_tree = 1;
-  uint32_t m_count_leaf = 1;
-  uint32_t m_count_node = 1;
+  uint32_t depth_curr_ = 1;
+  uint32_t count_leaf_ = 1;
+  uint32_t count_node_ = 1;
 };
 
 class BVH : public Accel {
  public:
-  bool divide(uint32_t nodeIndex, std::vector<AccelNode> *children) override;
+  void divide(uint32_t n, std::vector<AccelNode> *children) override;
   bool traverse(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const override;
+  std::pair<uint32_t,uint32_t> getLimits() const override;
  private:
-  static constexpr uint32_t COUNT_BVH_MIN = 16;
-  static constexpr uint32_t DEPTH_BVH_MAX = 32;
-  static constexpr uint32_t COUNT_BUCKET = 10;
+  uint32_t COUNT_MIN = 16;
+  uint32_t DEPTH_MAX = 32;
+  uint32_t COUNT_BUCKET = 10;
 };
 
 class OctTree : public Accel {
  public:
-  bool divide(uint32_t nodeIndex, std::vector<AccelNode> *children) override;
+  void divide(uint32_t n, std::vector<AccelNode> *children) override;
   bool traverse(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const override;
+  std::pair<uint32_t,uint32_t> getLimits() const override;
  private:
-  static constexpr uint32_t COUNT_OCT_MIN = 16;
-  static constexpr uint32_t DEPTH_OCT_MAX = 12;
+  uint32_t COUNT_MIN = 16;
+  uint32_t DEPTH_MAX = 12;
 };
 
 NORI_NAMESPACE_END

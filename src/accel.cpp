@@ -17,11 +17,20 @@ void Accel::addMesh(Mesh *mesh) {
   m_bbox = m_mesh->getBoundingBox();
 }
 
+std::pair<uint32_t, uint32_t> OctTree::getLimits() const {
+  return {16, 12};//count,depth
+}
+
+std::pair<uint32_t, uint32_t> BVH::getLimits() const {
+  return {16, 32};//count,depth
+}
+
 void Accel::build() {
   if (!m_mesh) return;
 
   auto start = std::chrono::high_resolution_clock::now();
 
+  //初始化树
   m_tree.clear();
   auto root = AccelNode(m_mesh->getBoundingBox(), m_mesh->getTriangleCount());
   for (int i = 0; i < root.indices.size(); i++) {
@@ -29,110 +38,117 @@ void Accel::build() {
   }
   m_tree.emplace_back(root);
 
+  //初始化辅助队列
   std::queue<uint32_t> q;
   q.push(0);
 
+  //初始化子节点列表
   auto children = std::vector<AccelNode>();
+
+  //获取限制条件
+  auto [LIMIT_COUNT, LIMIT_DEPTH] = getLimits();
+  //构建树
   while (!q.empty()) {
     uint32_t n = q.size();//层次遍历
     for (uint32_t k = 0; k < n; k++) {
-      if (divide(q.front(), &children)) {
-        --m_count_leaf;
+      //限制之内对节点继续分叉
+      if (m_tree[q.front()].indices.size() > LIMIT_COUNT && depth_curr_ < LIMIT_DEPTH) {
+        //设置子节点起始索引
+        m_tree[q.front()].child = m_tree.size();
+        //分割子节点
+        divide(q.front(), &children);
+        //子节点加入树，索引入队
+        --count_leaf_;
         for (auto &child : children) {
           q.push(m_tree.size());
           m_tree.emplace_back(child);
-          ++m_count_node;
-          ++m_count_leaf;
+          ++count_node_;
+          ++count_leaf_;
         }
       }
+      //清理无用数据
       q.pop();
       children.clear();
       children.shrink_to_fit();
     }
-    m_depth_tree++;
+    depth_curr_++;
   }
 
   auto over = std::chrono::high_resolution_clock::now();
   auto time = std::chrono::duration_cast<std::chrono::milliseconds>(over - start).count();
 
-  std::cout << "[time to build the tree]: " << time << "ms" << std::endl;
-  std::cout << "[max depth of the tree]: " << m_depth_tree << std::endl;
-  std::cout << "[node count of the tree]: " << m_count_node << std::endl;
-  std::cout << "[leaf count of the tree]: " << m_count_leaf << std::endl;
+  std::cout << "[build time]: " << time << "ms" << std::endl;
+  std::cout << "[max depth]: " << depth_curr_ << std::endl;
+  std::cout << "[node count]: " << count_node_ << std::endl;
+  std::cout << "[leaf count]: " << count_leaf_ << std::endl;
 }
 
-bool OctTree::divide(uint32_t nodeIndex, std::vector<AccelNode> *children) {
-  if (m_tree[nodeIndex].indices.size() < COUNT_OCT_MIN)
-    return false;
-  if (m_depth_tree > DEPTH_OCT_MAX)
-    return false;
-
-  m_tree[nodeIndex].child = m_tree.size();
-  Vector3f center = m_tree[nodeIndex].bbox.getCenter();
-  for (uint32_t i = 0; i < 8; i++) {
-    Vector3f corner = m_tree[nodeIndex].bbox.getCorner(i);
-    Vector3f minPoint, maxPoint;
+void OctTree::divide(uint32_t n, std::vector<AccelNode> *children) {
+  //获取包围盒中心点
+  Vector3f center = m_tree[n].bbox.getCenter();
+  //获取包围盒八个拐角点
+  for (size_t i = 0; i < 8; i++) {
+    //构建子包围盒
+    Vector3f corner = m_tree[n].bbox.getCorner(i);
+    BoundingBox3f bbox_sub;
     for (uint32_t j = 0; j < 3; j++) {
-      minPoint[j] = std::min(center[j], corner[j]);
-      maxPoint[j] = std::max(center[j], corner[j]);
+      bbox_sub.min[j] = std::min(center[j], corner[j]);
+      bbox_sub.max[j] = std::max(center[j], corner[j]);
     }
 
-    BoundingBox3f bbox_sub(minPoint, maxPoint);
+    //构建子节点
     AccelNode node_sub(bbox_sub);
-    for (auto face : m_tree[nodeIndex].indices) {
+    for (auto face : m_tree[n].indices) {
+      //检测节点持有的图元与子包围盒是否重叠
       if (bbox_sub.overlaps(m_mesh->getBoundingBox(face))) {
         node_sub.indices.emplace_back(face);
       }
     }
     children->emplace_back(node_sub);
   }
-  return true;
 }
 
-bool BVH::divide(uint32_t nodeIndex, std::vector<AccelNode> *children) {
-  if (m_tree[nodeIndex].indices.size() < COUNT_BVH_MIN)
-    return false;
-  if (m_depth_tree > DEPTH_BVH_MAX)
-    return false;
-
-  m_tree[nodeIndex].child = m_tree.size();
-  uint32_t dimension = m_tree[nodeIndex].bbox.getMajorAxis();//在最长维度排序
+void BVH::divide(uint32_t n, std::vector<AccelNode> *children) {
+  //在最长维度排序
+  uint32_t dimension = m_tree[n].bbox.getMajorAxis();
   std::sort(
-      m_tree[nodeIndex].indices.begin(),
-      m_tree[nodeIndex].indices.end(),
+      m_tree[n].indices.begin(),
+      m_tree[n].indices.end(),
       [this, dimension](uint32_t f1, uint32_t f2) {
         return m_mesh->getBoundingBox(f1).getCenter()[dimension] <
             m_mesh->getBoundingBox(f2).getCenter()[dimension];
       }
   );
 
-  float cost_min = std::numeric_limits<float>::infinity(); //分桶
+  //分桶
+  float cost_min = std::numeric_limits<float>::infinity();
   AccelNode leftNode, rightNode;
   std::vector<uint32_t> faces_left, faces_right;
-
   for (uint32_t i = 1; i < COUNT_BUCKET; i++) {
-    auto begin_bucket = m_tree[nodeIndex].indices.begin();
-    auto mid_bucket = m_tree[nodeIndex].indices.begin() + (static_cast<uint32_t>(m_tree[nodeIndex].indices.size()) * i / COUNT_BUCKET);
-    auto end_bucket = m_tree[nodeIndex].indices.end();
-    faces_left = std::vector<uint32_t>(begin_bucket, mid_bucket);
-    faces_right = std::vector<uint32_t>(mid_bucket, end_bucket);
-
-    BoundingBox3f bbox_left, bbox_right;
+    auto begin = m_tree[n].indices.begin();
+    auto mid = m_tree[n].indices.begin() + (static_cast<uint32_t>(m_tree[n].indices.size()) * i / COUNT_BUCKET);
+    auto end = m_tree[n].indices.end();
+    faces_left = std::vector<uint32_t>(begin, mid);
+    faces_right = std::vector<uint32_t>(mid, end);
 
     //合并包围盒
-    for (auto left : faces_left)
+    BoundingBox3f bbox_left, bbox_right;
+    for (auto left : faces_left) {
       bbox_left.expandBy(m_mesh->getBoundingBox(left));
-
-    for (auto right : faces_right)
+    }
+    for (auto right : faces_right) {
       bbox_right.expandBy(m_mesh->getBoundingBox(right));
+    }
 
+    //计算成本
     float S_LEFT = bbox_left.getSurfaceArea();
     float S_RIGHT = bbox_right.getSurfaceArea();
-    float S_ALL = m_tree[nodeIndex].bbox.getSurfaceArea();
+    float S_ALL = m_tree[n].bbox.getSurfaceArea();
     float cost = 0.125f +
         static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
         static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
 
+    //根据成本选择分桶方案
     if (cost < cost_min) {
       cost_min = cost;
       leftNode.bbox = std::move(bbox_left);
@@ -143,7 +159,6 @@ bool BVH::divide(uint32_t nodeIndex, std::vector<AccelNode> *children) {
   }
   children->emplace_back(leftNode);
   children->emplace_back(rightNode);
-  return true;
 }
 
 bool Accel::rayIntersect(const Ray3f &ray_, Intersection &its, bool shadowRay) const {
@@ -170,7 +185,6 @@ bool Accel::rayIntersect(const Ray3f &ray_, Intersection &its, bool shadowRay) c
   }*/
 
   foundIntersection = traverse(0, ray, its, f, shadowRay);
-
 
   if (shadowRay)
     return foundIntersection;
