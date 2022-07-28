@@ -84,12 +84,13 @@ void Accel::build() {
 }
 
 void OctTree::divide(uint32_t n, std::vector<AccelNode> *children) {
+  auto & node =  m_tree[n];
   //获取包围盒中心点
-  Vector3f center = m_tree[n].bbox.getCenter();
+  Vector3f center = node.bbox.getCenter();
   //获取包围盒八个拐角点
   for (size_t i = 0; i < 8; i++) {
     //构建子包围盒
-    Vector3f corner = m_tree[n].bbox.getCorner(i);
+    Vector3f corner = node.bbox.getCorner(i);
     BoundingBox3f bbox_sub;
     for (uint32_t j = 0; j < 3; j++) {
       bbox_sub.min[j] = std::min(center[j], corner[j]);
@@ -98,7 +99,7 @@ void OctTree::divide(uint32_t n, std::vector<AccelNode> *children) {
 
     //构建子节点
     AccelNode node_sub(bbox_sub);
-    for (auto face : m_tree[n].indices) {
+    for (auto face : node.indices) {
       //检测节点持有的图元与子包围盒是否重叠
       if (bbox_sub.overlaps(m_mesh->getBoundingBox(face))) {
         node_sub.indices.emplace_back(face);
@@ -109,11 +110,12 @@ void OctTree::divide(uint32_t n, std::vector<AccelNode> *children) {
 }
 
 void BVH::divide(uint32_t n, std::vector<AccelNode> *children) {
+  auto & node =  m_tree[n];
   //在最长维度排序
-  uint32_t dimension = m_tree[n].bbox.getMajorAxis();
+  uint32_t dimension = node.bbox.getMajorAxis();
   std::sort(
-      m_tree[n].indices.begin(),
-      m_tree[n].indices.end(),
+      node.indices.begin(),
+      node.indices.end(),
       [this, dimension](uint32_t f1, uint32_t f2) {
         return m_mesh->getBoundingBox(f1).getCenter()[dimension] <
             m_mesh->getBoundingBox(f2).getCenter()[dimension];
@@ -125,9 +127,10 @@ void BVH::divide(uint32_t n, std::vector<AccelNode> *children) {
   AccelNode leftNode, rightNode;
   std::vector<uint32_t> faces_left, faces_right;
   for (uint32_t i = 1; i < COUNT_BUCKET; i++) {
-    auto begin = m_tree[n].indices.begin();
-    auto mid = m_tree[n].indices.begin() + (static_cast<uint32_t>(m_tree[n].indices.size()) * i / COUNT_BUCKET);
-    auto end = m_tree[n].indices.end();
+    //根据通的数量依次划分左右
+    auto begin = node.indices.begin();
+    auto mid = node.indices.begin() + (static_cast<uint32_t>(node.indices.size()) * i / COUNT_BUCKET);
+    auto end = node.indices.end();
     faces_left = std::vector<uint32_t>(begin, mid);
     faces_right = std::vector<uint32_t>(mid, end);
 
@@ -143,7 +146,7 @@ void BVH::divide(uint32_t n, std::vector<AccelNode> *children) {
     //计算成本
     float S_LEFT = bbox_left.getSurfaceArea();
     float S_RIGHT = bbox_right.getSurfaceArea();
-    float S_ALL = m_tree[n].bbox.getSurfaceArea();
+    float S_ALL = node.bbox.getSurfaceArea();
     float cost = 0.125f +
         static_cast<float>(faces_left.size()) * S_LEFT / S_ALL +
         static_cast<float>(faces_right.size()) * S_RIGHT / S_ALL;
