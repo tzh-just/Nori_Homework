@@ -59,7 +59,7 @@ NORI_NAMESPACE_BEGIN
     }
 
     float Warp::squareToUniformHemispherePdf(const Vector3f &v) {
-        return v.z() >= 0 ? INV_FOURPI : 0;
+        return v.z() >= 0 ? INV_TWOPI : 0;
     }
 
     Vector3f Warp::squareToCosineHemisphere(const Point2f &sample) {
