@@ -13,66 +13,78 @@
 #include <utility>
 
 NORI_NAMESPACE_BEGIN
-struct AccelNode {
-  uint32_t child = 0;
-  BoundingBox3f bbox;
-  std::vector<std::pair<uint32_t,uint32_t>> indices;
+    struct AccelNode
+    {
+        uint32_t child = 0;
+        BoundingBox3f bbox;
+        std::vector<std::pair<uint32_t, uint32_t>> indices;
 
-  AccelNode() : bbox() {}
-  explicit AccelNode(BoundingBox3f box)
-      : bbox(std::move(box)) {}
-  AccelNode(BoundingBox3f box, uint32_t size)
-      : bbox(std::move(box)), indices(size) {}
-};
+        AccelNode() : bbox() {}
 
-class Accel {
- public:
-  void addMesh(Mesh *mesh);
+        explicit AccelNode(BoundingBox3f box)
+                : bbox(std::move(box)) {}
 
-  void build();
+        AccelNode(BoundingBox3f box, uint32_t size)
+                : bbox(std::move(box)), indices(size) {}
+    };
 
-  bool rayIntersect(const Ray3f &ray, Intersection &its, bool shadowRay) const;
+    class Accel
+    {
+    public:
+        void addMesh(Mesh* mesh);
 
-  virtual void divide(uint32_t n, std::vector<AccelNode> *children) = 0;
+        void build();
 
-  virtual bool traverse(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const = 0;
+        bool rayIntersect(const Ray3f& ray, Intersection& its, bool shadowRay) const;
 
-  virtual std::pair<uint32_t,uint32_t> getLimits() const = 0;
+        virtual void divide(uint32_t n, std::vector<AccelNode>* children) = 0;
 
-  const BoundingBox3f &getBoundingBox() { return m_bbox; }
+        virtual bool traverse(uint32_t n, Ray3f& ray, Intersection& its, uint32_t& f, bool shadowRay) const = 0;
 
-  uint32_t getTotalTriangleCount() const{return m_indexes.size();}
+        virtual std::pair<uint32_t, uint32_t> getLimits() const = 0;
 
- protected:
-  std::vector<Mesh*> m_meshes;
-  BoundingBox3f m_bbox;
-  std::vector<AccelNode> m_tree;
-  std::vector<std::pair<uint32_t,uint32_t>> m_indexes;
+        const BoundingBox3f& getBoundingBox() { return m_bbox; }
 
-  uint32_t depth_curr_ = 1;
-  uint32_t count_leaf_ = 1;
-  uint32_t count_node_ = 1;
-};
+        uint32_t getTotalTriangleCount() const { return m_indexes.size(); }
 
-class BVH : public Accel {
- public:
-  void divide(uint32_t n, std::vector<AccelNode> *children) override;
-  bool traverse(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const override;
-  std::pair<uint32_t,uint32_t> getLimits() const override;
- private:
-  uint32_t COUNT_MIN = 16;
-  uint32_t DEPTH_MAX = 32;
-  uint32_t COUNT_BUCKET = 10;
-};
+    protected:
+        std::vector<Mesh*> m_meshes;
+        BoundingBox3f m_bbox;
+        std::vector<AccelNode> m_tree;
+        std::vector<std::pair<uint32_t, uint32_t>> m_indexes;
 
-class OctTree : public Accel {
- public:
-  void divide(uint32_t n, std::vector<AccelNode> *children) override;
-  bool traverse(uint32_t n, Ray3f &ray, Intersection &its, uint32_t &f, bool shadowRay) const override;
-  std::pair<uint32_t,uint32_t> getLimits() const override;
- private:
-  uint32_t COUNT_MIN = 16;
-  uint32_t DEPTH_MAX = 12;
-};
+        uint32_t depth_curr_ = 1;
+        uint32_t count_leaf_ = 1;
+        uint32_t count_node_ = 1;
+    };
+
+    class BVH : public Accel
+    {
+    public:
+        void divide(uint32_t n, std::vector<AccelNode>* children) override;
+
+        bool traverse(uint32_t n, Ray3f& ray, Intersection& its, uint32_t& f, bool shadowRay) const override;
+
+        std::pair<uint32_t, uint32_t> getLimits() const override;
+
+    private:
+        uint32_t COUNT_MIN = 16;
+        uint32_t DEPTH_MAX = 32;
+        uint32_t COUNT_BUCKET = 10;
+    };
+
+    class OctTree : public Accel
+    {
+    public:
+        void divide(uint32_t n, std::vector<AccelNode>* children) override;
+
+        bool traverse(uint32_t n, Ray3f& ray, Intersection& its, uint32_t& f, bool shadowRay) const override;
+
+        std::pair<uint32_t, uint32_t> getLimits() const override;
+
+    private:
+        uint32_t COUNT_MIN = 16;
+        uint32_t DEPTH_MAX = 12;
+    };
 
 NORI_NAMESPACE_END

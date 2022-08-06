@@ -31,27 +31,32 @@ NORI_NAMESPACE_BEGIN
             auto result = mesh->sampleSurfaceUniform(sampler);
             record.p = result.p;
             record.n = result.n;
-            record.wi = (record.p-record.ref).normalized();
-            record.shadowRay = Ray3f(record.ref,record.wi,Epsilon,(record.p-record.ref).norm()-Epsilon);
-            record.pdf = pdf(mesh,record);
-            if(record.pdf>0.0f && !std::isnan(record.pdf) && !std::isinf(record.pdf)){
-                return eval(record)/record.pdf;
+            record.wi = (record.p - record.ref).normalized();
+            record.shadowRay = Ray3f(record.ref, record.wi, Epsilon, (record.p - record.ref).norm() - Epsilon);
+            record.pdf = pdf(mesh, record);
+            if (record.pdf > 0.0f && !std::isnan(record.pdf) && !std::isinf(record.pdf))
+            {
+                return eval(record) / record.pdf;
             }
             return Color3f(0.0f);
         }
 
-        float pdf(const Mesh *mesh, const EmitterQueryRecord &record) const override{
+        float pdf(const Mesh* mesh, const EmitterQueryRecord& record) const override
+        {
             float costTheta = record.n.dot(-record.wi);
-            if(costTheta<=0.0f){
+            if (costTheta <= 0.0f)
+            {
                 return 0.0f;
             }
             //光源pdf转为立体角上
-            return mesh->getPdf().getNormalization() * (record.p-record.ref).squaredNorm()/costTheta;
+            return mesh->getPdf().getNormalization() * (record.p - record.ref).squaredNorm() / costTheta;
         }
 
-        std::string toString() const override {
+        std::string toString() const override
+        {
             return "Emitter[]";
         }
     };
+
     NORI_REGISTER_CLASS(AreaLight, "area")
 NORI_NAMESPACE_END
