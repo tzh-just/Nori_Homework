@@ -7,7 +7,7 @@
 #pragma once
 
 #include <nori/accel.h>
-
+#include <nori/emitter.h>
 NORI_NAMESPACE_BEGIN
 
 /**
@@ -97,6 +97,11 @@ public:
      */
     void activate();
 
+    Mesh* getRandomEmitter(float random)const{
+        return m_meshes_emitter.empty()? nullptr :m_meshes_emitter[0];
+    }
+
+    const std::vector<Mesh *>& getEmitters() const{ return m_meshes_emitter;}
     /// Add a child object to the scene (meshes, integrators etc.)
     void addChild(NoriObject *obj);
 
@@ -106,6 +111,8 @@ public:
     EClassType getClassType() const { return EScene; }
 private:
     std::vector<Mesh *> m_meshes;
+    std::vector<Mesh *> m_meshes_emitter;
+    std::vector<Emitter *> m_emitters;
     Integrator *m_integrator = nullptr;
     Sampler *m_sampler = nullptr;
     Camera *m_camera = nullptr;

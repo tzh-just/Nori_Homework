@@ -13,6 +13,8 @@
 
 NORI_NAMESPACE_BEGIN
 
+
+
 Scene::Scene(const PropertyList &) {
     m_accel = new BVH();
     //m_accel = new OctTree();
@@ -32,7 +34,7 @@ void Scene::activate() {
         throw NoriException("No integrator was specified!");
     if (!m_camera)
         throw NoriException("No camera was specified!");
-    
+
     if (!m_sampler) {
         /* Create a default (independent) sampler */
         m_sampler = static_cast<Sampler*>(
@@ -50,13 +52,15 @@ void Scene::addChild(NoriObject *obj) {
                 Mesh *mesh = static_cast<Mesh *>(obj);
                 m_accel->addMesh(mesh);
                 m_meshes.push_back(mesh);
+                if(mesh->isEmitter()){
+                    m_meshes_emitter.push_back(mesh);
+                }
             }
             break;
-        
+
         case EEmitter: {
-                //Emitter *emitter = static_cast<Emitter *>(obj);
-                /* TBD */
-                throw NoriException("Scene::addChild(): You need to implement this for emitters");
+                Emitter *emitter = static_cast<Emitter *>(obj);
+                m_emitters.push_back(emitter);
             }
             break;
 
@@ -71,7 +75,7 @@ void Scene::addChild(NoriObject *obj) {
                 throw NoriException("There can only be one camera per scene!");
             m_camera = static_cast<Camera *>(obj);
             break;
-        
+
         case EIntegrator:
             if (m_integrator)
                 throw NoriException("There can only be one integrator per scene!");

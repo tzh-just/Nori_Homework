@@ -16,7 +16,7 @@ NORI_NAMESPACE_BEGIN
 struct AccelNode {
   uint32_t child = 0;
   BoundingBox3f bbox;
-  std::vector<uint32_t> indices;
+  std::vector<std::pair<uint32_t,uint32_t>> indices;
 
   AccelNode() : bbox() {}
   explicit AccelNode(BoundingBox3f box)
@@ -41,10 +41,13 @@ class Accel {
 
   const BoundingBox3f &getBoundingBox() { return m_bbox; }
 
+  uint32_t getTotalTriangleCount() const{return m_indexes.size();}
+
  protected:
-  Mesh *m_mesh = nullptr;
+  std::vector<Mesh*> m_meshes;
   BoundingBox3f m_bbox;
   std::vector<AccelNode> m_tree;
+  std::vector<std::pair<uint32_t,uint32_t>> m_indexes;
 
   uint32_t depth_curr_ = 1;
   uint32_t count_leaf_ = 1;
