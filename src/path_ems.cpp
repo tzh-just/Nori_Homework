@@ -5,12 +5,12 @@
 #include <nori/bsdf.h>
 
 NORI_NAMESPACE_BEGIN
-    class WhittedIntegrator : public Integrator
+    class PathEmsIntegrator : public Integrator
     {
     private:
         int maxDepth = 10;
     public:
-        WhittedIntegrator(const PropertyList& props) {}
+        PathEmsIntegrator(const PropertyList& props) {}
 
         Color3f Li(const Scene* scene, Sampler* sampler, const Ray3f& ray_) const
         {
@@ -85,5 +85,5 @@ NORI_NAMESPACE_BEGIN
         }
     };
 
-    NORI_REGISTER_CLASS(WhittedIntegrator, "whitted");
+    NORI_REGISTER_CLASS(PathEmsIntegrator, "path_ems");
 NORI_NAMESPACE_END
